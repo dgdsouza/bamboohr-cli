@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 
 export interface AuthConfig {
   method: 'api-key' | 'oauth';
@@ -18,6 +18,15 @@ export interface Config {
 
 const CONFIG_DIR = join(homedir(), '.bamboohr-cli');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const PENDING_OAUTH_FILE = join(CONFIG_DIR, 'oauth-pending.json');
+
+export interface PendingOAuth {
+  companyDomain: string;
+  clientId: string;
+  clientSecret: string;
+  state: string;
+  createdAt: number;
+}
 
 function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) {
@@ -41,6 +50,29 @@ export function saveConfig(config: Config): void {
 
 export function clearConfig(): void {
   saveConfig({});
+  clearPendingOAuth();
+}
+
+export function savePendingOAuth(pending: PendingOAuth): void {
+  ensureConfigDir();
+  writeFileSync(PENDING_OAUTH_FILE, JSON.stringify(pending, null, 2), { encoding: 'utf-8', mode: 0o600 });
+}
+
+export function loadPendingOAuth(): PendingOAuth | null {
+  try {
+    const data = readFileSync(PENDING_OAUTH_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingOAuth(): void {
+  try {
+    unlinkSync(PENDING_OAUTH_FILE);
+  } catch {
+    // Nothing pending.
+  }
 }
 
 export function getBaseUrl(config: Config): string {

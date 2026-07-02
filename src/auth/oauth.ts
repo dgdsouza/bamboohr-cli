@@ -2,7 +2,13 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { URL } from 'node:url';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { saveConfig, type Config } from '../config.js';
+import {
+  saveConfig,
+  savePendingOAuth,
+  loadPendingOAuth,
+  clearPendingOAuth,
+  type Config,
+} from '../config.js';
 import { assertValidDomain } from './domain.js';
 import { redactErrorBody } from '../utils/errors.js';
 
@@ -169,6 +175,112 @@ export async function refreshAccessToken(config: Config): Promise<string> {
   return data.access_token;
 }
 
+const ALL_SCOPES = [
+  'openid', 'email',
+  'employee', 'employee:assets', 'employee:compensation', 'employee:contact',
+  'employee:custom_fields', 'employee:custom_fields_encrypted',
+  'employee:demographic', 'employee:dependent', 'employee:dependent:ssn',
+  'employee:education', 'employee:emergency_contacts', 'employee:file',
+  'employee:identification', 'employee:job', 'employee:management',
+  'employee:name', 'employee:payroll', 'employee:photo', 'employee:providers',
+  'employee:providers:payroll', 'employee_directory', 'employee_verifications',
+  'esignature', 'goal', 'onboarding',
+  'performance:assessments', 'performance:feedback', 'performance:one_on_ones',
+  'report', 'time_off',
+];
+
+function buildAuthorizeUrl(companyDomain: string, clientId: string, state: string): string {
+  return (
+    `${getAuthorizeUrl(companyDomain)}?request=authorize&response_type=code` +
+    `&client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&state=${encodeURIComponent(state)}` +
+    `&scope=${encodeURIComponent(ALL_SCOPES.join(' '))}`
+  );
+}
+
+const PENDING_OAUTH_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Step 1 of the manual (no-browser) OAuth flow, for headless or sandboxed
+ * environments where the CLI cannot open a browser or receive the loopback
+ * redirect (e.g. Claude Cowork / remote sessions). Returns the authorize URL
+ * for the user to open themselves; the state and credentials are persisted
+ * until `completeManualOAuth` is called.
+ */
+export function startManualOAuth(
+  companyDomain: string,
+  clientId: string,
+  clientSecret: string,
+): { authorizeUrl: string; redirectUri: string } {
+  assertValidDomain(companyDomain);
+
+  const state = base64url(randomBytes(16));
+  savePendingOAuth({ companyDomain, clientId, clientSecret, state, createdAt: Date.now() });
+
+  return { authorizeUrl: buildAuthorizeUrl(companyDomain, clientId, state), redirectUri: REDIRECT_URI };
+}
+
+function parseRedirectInput(input: string): { code: string; state: string | null } {
+  const trimmed = input.trim();
+  if (trimmed.includes('?') || trimmed.includes('://')) {
+    let url: URL;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      throw new Error('Could not parse the pasted redirect URL. Paste the full URL from the browser address bar.');
+    }
+    const error = url.searchParams.get('error');
+    if (error) {
+      throw new Error(`Authorization failed: ${error}`);
+    }
+    const code = url.searchParams.get('code');
+    if (!code) {
+      throw new Error('The pasted URL has no "code" parameter. Paste the full URL from the browser address bar after authorizing.');
+    }
+    return { code, state: url.searchParams.get('state') };
+  }
+  // Bare authorization code.
+  return { code: trimmed, state: null };
+}
+
+/**
+ * Step 2 of the manual OAuth flow. Accepts the full redirect URL the user
+ * copied from the browser address bar (preferred, so state is verified) or a
+ * bare authorization code with the state passed separately.
+ */
+export async function completeManualOAuth(redirectUrlOrCode: string, explicitState?: string): Promise<void> {
+  const pending = loadPendingOAuth();
+  if (!pending) {
+    throw new Error('No pending OAuth login. Run: bamboohr login-oauth-start');
+  }
+  if (Date.now() - pending.createdAt > PENDING_OAUTH_TTL_MS) {
+    clearPendingOAuth();
+    throw new Error('Pending OAuth login expired. Run: bamboohr login-oauth-start again.');
+  }
+
+  const { code, state } = parseRedirectInput(redirectUrlOrCode);
+  const effectiveState = state ?? explicitState;
+  if (!effectiveState || !constantTimeEquals(effectiveState, pending.state)) {
+    throw new Error('OAuth state mismatch — the pasted URL does not match the pending login. Run: bamboohr login-oauth-start again.');
+  }
+
+  const tokens = await exchangeCodeForToken(pending.companyDomain, code, pending.clientId, pending.clientSecret);
+
+  const config: Config = {
+    companyDomain: pending.companyDomain,
+    auth: {
+      method: 'oauth',
+      clientId: pending.clientId,
+      clientSecret: pending.clientSecret,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    },
+  };
+  saveConfig(config);
+  clearPendingOAuth();
+}
+
 export async function loginWithOAuth(
   companyDomain: string,
   clientId: string,
@@ -178,25 +290,7 @@ export async function loginWithOAuth(
 
   const state = base64url(randomBytes(16));
 
-  const authorizeUrl =
-    `${getAuthorizeUrl(companyDomain)}?request=authorize&response_type=code` +
-    `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&state=${encodeURIComponent(state)}` +
-    `&scope=${encodeURIComponent([
-      'openid', 'email',
-      'employee', 'employee:assets', 'employee:compensation', 'employee:contact',
-      'employee:custom_fields', 'employee:custom_fields_encrypted',
-      'employee:demographic', 'employee:dependent', 'employee:dependent:ssn',
-      'employee:education', 'employee:emergency_contacts', 'employee:file',
-      'employee:identification', 'employee:job', 'employee:management',
-      'employee:name', 'employee:payroll', 'employee:photo', 'employee:providers',
-      'employee:providers:payroll', 'employee_directory', 'employee_verifications',
-      'esignature', 'goal', 'onboarding',
-      'performance:assessments', 'performance:feedback', 'performance:one_on_ones',
-      'report', 'time_off',
-    ].join(' '))}`;
-
+  const authorizeUrl = buildAuthorizeUrl(companyDomain, clientId, state);
 
   console.log('Opening browser for authorization...');
   console.log(`If it doesn't open, visit: ${authorizeUrl}`);

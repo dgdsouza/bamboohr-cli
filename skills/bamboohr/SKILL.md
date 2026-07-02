@@ -7,6 +7,18 @@ description: Query and update BambooHR data (employees, time off, compensation, 
 
 You have access to a `bamboohr` CLI that talks to the BambooHR API. Every command emits JSON to stdout, so pipe results into `node -e` or `jq` to filter and aggregate.
 
+## Running the CLI
+
+This skill is self-contained: the full CLI is bundled at `scripts/bamboohr.js` next to this SKILL.md (single file, no npm install, requires Node 20+). Set up an alias once per session, using the directory this SKILL.md lives in:
+
+```bash
+bamboohr() { node "<this skill's directory>/scripts/bamboohr.js" "$@"; }
+```
+
+If a global `bamboohr` command is already on `PATH`, use that instead. All examples below assume `bamboohr` resolves one way or the other.
+
+The CLI automatically routes through `HTTPS_PROXY`/`HTTP_PROXY` when set, so it works inside sandboxed environments (Claude Cowork, Claude Code on the web) as long as the environment's network policy allows `*.bamboohr.com` and `api.bamboohr.com`.
+
 ## Before you start
 
 Check authentication first:
@@ -15,11 +27,39 @@ Check authentication first:
 bamboohr status
 ```
 
-If unauthenticated, ask the user which method to use:
-- `bamboohr login --domain <subdomain> --api-key <key>` (or via `BAMBOOHR_DOMAIN` / `BAMBOOHR_API_KEY`)
-- `bamboohr login-oauth --domain <subdomain> --client-id <id> --client-secret <secret>` (or env vars). This opens a browser for authorization.
+If unauthenticated, pick the flow that fits the environment:
+
+- **API key** (any environment): `bamboohr login --domain <subdomain> --api-key <key>` (or via `BAMBOOHR_DOMAIN` / `BAMBOOHR_API_KEY`)
+- **OAuth with a local browser** (CLI running on the user's own machine): `bamboohr login-oauth --domain <subdomain> --client-id <id> --client-secret <secret>` (or env vars). Opens a browser and catches the redirect on `localhost:19876`.
+- **OAuth without a browser** (sandboxed/remote environments — Claude Cowork, Claude Code on the web, SSH): use the two-step manual flow below. The sandbox cannot open the user's browser or receive the localhost redirect, so the user completes authorization themselves and pastes the result back.
 
 Never invent credentials. If the user has not provided them, ask.
+
+### Manual OAuth flow (use this in Claude Cowork)
+
+1. Get the company subdomain, OAuth client ID, and client secret (from the user, or from `BAMBOOHR_DOMAIN` / `BAMBOOHR_CLIENT_ID` / `BAMBOOHR_CLIENT_SECRET` if the environment defines them).
+2. Start the login — this prints an `authorize_url` and remembers the pending login for 15 minutes:
+
+   ```bash
+   bamboohr login-oauth-start --domain <subdomain> --client-id <id> --client-secret <secret>
+   ```
+
+3. Show the `authorize_url` to the user as a clickable link and tell them to:
+   - open it in their browser and approve access;
+   - expect the browser to land on `http://localhost:19876/callback` and **fail to load — that is normal**;
+   - copy the **full URL** from the address bar (it contains `code=` and `state=`) and paste it back into the chat.
+4. Finish the login (single-quote the URL — it contains `&`):
+
+   ```bash
+   bamboohr login-oauth-complete --redirect-url '<pasted url>'
+   ```
+
+5. Confirm with `bamboohr status`. Tokens are stored in `~/.bamboohr-cli/config.json` and refreshed automatically; if the sandbox is fresh (new session, ephemeral VM), the user will need to log in again.
+
+Notes:
+- The authorization code is single-use and expires in minutes — if `login-oauth-complete` fails with an expired/invalid code, just restart from step 2.
+- The BambooHR OAuth app must have `http://localhost:19876/callback` registered as its redirect URI and the scopes listed at the bottom of this file enabled.
+- A `fetch failed` error on login usually means the environment's network policy blocks `*.bamboohr.com` — the user needs to allow it in their sandbox/network settings. TLS errors behind an inspecting proxy are fixed by pointing `NODE_EXTRA_CA_CERTS` at the proxy's CA bundle.
 
 ## Core workflows
 

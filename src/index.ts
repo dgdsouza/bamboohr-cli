@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { configureProxyFromEnv } from './utils/proxy.js';
 import { registerLoginCommand } from './commands/login.js';
 import { registerEmployeesCommands } from './commands/employees.js';
 import { registerTimeOffCommands } from './commands/time-off.js';
@@ -15,6 +16,8 @@ import { registerDatasetsCommands } from './commands/datasets.js';
 import { registerHoursCommands } from './commands/hours.js';
 import { registerPhotosCommands } from './commands/photos.js';
 import { registerTablesCommands } from './commands/tables.js';
+
+configureProxyFromEnv();
 
 const program = new Command();
 

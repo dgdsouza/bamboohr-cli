@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { loginWithApiKey } from '../auth/api-key.js';
-import { loginWithOAuth } from '../auth/oauth.js';
+import { loginWithOAuth, startManualOAuth, completeManualOAuth } from '../auth/oauth.js';
 import { loadConfig, clearConfig } from '../config.js';
 import { output } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
@@ -45,6 +45,53 @@ export function registerLoginCommand(program: Command): void {
         const clientSecret = resolveSecret(opts.clientSecret, 'BAMBOOHR_CLIENT_SECRET', 'client secret');
         await loginWithOAuth(domain, clientId, clientSecret);
         output({ status: 'ok', method: 'oauth', domain });
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  program
+    .command('login-oauth-start')
+    .description('Start OAuth login without a browser (for sandboxed/headless environments like Claude Cowork). Prints the URL to authorize in your own browser.')
+    .option('--domain <domain>', 'Your BambooHR company domain (or set BAMBOOHR_DOMAIN)')
+    .option('--client-id <id>', 'OAuth application client ID (or set BAMBOOHR_CLIENT_ID)')
+    .option('--client-secret <secret>', 'OAuth application client secret (or set BAMBOOHR_CLIENT_SECRET)')
+    .action((opts) => {
+      try {
+        const domain = opts.domain ?? process.env.BAMBOOHR_DOMAIN;
+        if (!domain) throw new Error('Missing domain. Provide --domain or set BAMBOOHR_DOMAIN.');
+        const clientId = resolveSecret(opts.clientId, 'BAMBOOHR_CLIENT_ID', 'client id');
+        const clientSecret = resolveSecret(opts.clientSecret, 'BAMBOOHR_CLIENT_SECRET', 'client secret');
+        const { authorizeUrl, redirectUri } = startManualOAuth(domain, clientId, clientSecret);
+        output({
+          status: 'pending',
+          authorize_url: authorizeUrl,
+          instructions: [
+            'Open authorize_url in a browser and approve access.',
+            `The browser will then be redirected to ${redirectUri}, which will fail to load — that is expected.`,
+            'Copy the FULL URL from the browser address bar (it contains code=... and state=...).',
+            "Finish with: bamboohr login-oauth-complete --redirect-url '<pasted url>'",
+            'The pending login expires after 15 minutes.',
+          ],
+        });
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  program
+    .command('login-oauth-complete')
+    .description('Finish an OAuth login started with login-oauth-start by pasting the redirect URL from the browser address bar')
+    .option('--redirect-url <url>', 'Full redirect URL copied from the browser address bar (contains code and state)')
+    .option('--code <code>', 'Bare authorization code (requires --state)')
+    .option('--state <state>', 'State parameter, if passing a bare --code')
+    .action(async (opts) => {
+      try {
+        const input = opts.redirectUrl ?? opts.code;
+        if (!input) throw new Error('Missing input. Provide --redirect-url (preferred) or --code with --state.');
+        await completeManualOAuth(input, opts.state);
+        const config = loadConfig();
+        output({ status: 'ok', method: 'oauth', domain: config.companyDomain });
       } catch (err) {
         handleError(err);
       }

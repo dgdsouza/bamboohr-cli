@@ -29,6 +29,15 @@ npm install && npm run build
 node bin/bamboohr.js --help
 ```
 
+## Use as a Claude skill (Claude Cowork / Claude Code)
+
+The `skills/bamboohr/` folder is a self-contained [Agent Skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview): it bundles the entire CLI as a single file (`skills/bamboohr/scripts/bamboohr.js`, built by `npm run build`) alongside the `SKILL.md` instructions, so it needs no npm install in the target environment — just Node 20+.
+
+- **Claude Code**: copy the folder to `.claude/skills/bamboohr/` (project) or `~/.claude/skills/bamboohr/` (user).
+- **Claude Cowork / claude.ai**: zip the `skills/bamboohr/` folder and upload it as a skill.
+
+Employees authenticate with the browser-based manual OAuth flow described below (`login-oauth-start` / `login-oauth-complete`) — the skill walks Claude through it. The environment's network policy must allow `*.bamboohr.com` and `api.bamboohr.com`.
+
 ## Authentication
 
 The CLI supports two authentication methods.
@@ -74,6 +83,21 @@ The CLI requests all scopes BambooHR offers. The app must have these enabled in 
 Plus the OpenID Connect basics: `openid`, `email`.
 
 If a request returns 401 on a specific endpoint (e.g. `/employees/directory` works but compensation fails), the app likely needs the corresponding scope enabled — update the app in the developer portal, then re-run `login-oauth`.
+
+#### OAuth without a browser (sandboxed / headless environments)
+
+In environments that can't open a browser or receive the `localhost` redirect — Claude Cowork, Claude Code on the web, SSH sessions, CI — use the two-step manual flow:
+
+```bash
+# 1. Prints an authorize URL and remembers the pending login (15 min)
+bamboohr login-oauth-start --domain <subdomain> --client-id <id> --client-secret <secret>
+
+# 2. Open the URL in any browser, approve, then copy the full redirect URL
+#    from the address bar (the localhost page failing to load is expected)
+bamboohr login-oauth-complete --redirect-url 'http://localhost:19876/callback?code=...&state=...'
+```
+
+The CLI also honors `HTTPS_PROXY`/`HTTP_PROXY`, so it works behind sandbox egress proxies (use `NODE_EXTRA_CA_CERTS` if the proxy re-signs TLS).
 
 ### Other auth commands
 
