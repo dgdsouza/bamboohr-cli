@@ -16,7 +16,9 @@ export interface Config {
   auth?: AuthConfig;
 }
 
-const CONFIG_DIR = join(homedir(), '.bamboohr-cli');
+// BAMBOOHR_CONFIG_DIR relocates stored credentials, e.g. into a host-mounted
+// project folder so logins survive ephemeral sandboxes (Claude Cowork).
+const CONFIG_DIR = process.env.BAMBOOHR_CONFIG_DIR || join(homedir(), '.bamboohr-cli');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 const PENDING_OAUTH_FILE = join(CONFIG_DIR, 'oauth-pending.json');
 
@@ -31,6 +33,12 @@ export interface PendingOAuth {
 function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  }
+  // The config dir may live inside a project repo (BAMBOOHR_CONFIG_DIR);
+  // make it self-excluding so credentials can never be committed.
+  const gitignore = join(CONFIG_DIR, '.gitignore');
+  if (!existsSync(gitignore)) {
+    writeFileSync(gitignore, '*\n', { encoding: 'utf-8', mode: 0o600 });
   }
 }
 

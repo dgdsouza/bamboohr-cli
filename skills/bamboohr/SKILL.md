@@ -56,6 +56,16 @@ Never invent credentials. If the user has not provided them, ask.
 
 5. Confirm with `bamboohr status`. Tokens are stored in `~/.bamboohr-cli/config.json` and refreshed automatically; if the sandbox is fresh (new session, ephemeral VM), the user will need to log in again.
 
+#### Persisting the login across sessions
+
+The sandbox home directory is wiped between Cowork sessions, but the mounted project folder is not. To avoid re-logging-in every session, set `BAMBOOHR_CONFIG_DIR` to a folder on the mount before any command (including login):
+
+```bash
+export BAMBOOHR_CONFIG_DIR="<mounted project folder>/.bamboohr"
+```
+
+Export it at the start of every session — `bamboohr status` will then find the saved login. The CLI writes a `.gitignore` with `*` inside that folder so the credentials can't be committed, and files are created with `0600`. Ask the user before enabling this the first time: it stores their refresh token on the host, so they shouldn't use a folder that is synced or shared with other people.
+
 Notes:
 - The authorization code is single-use and expires in minutes — if `login-oauth-complete` fails with an expired/invalid code, just restart from step 2.
 - The BambooHR OAuth app must have `http://localhost:19876/callback` registered as its redirect URI and the scopes listed at the bottom of this file enabled.

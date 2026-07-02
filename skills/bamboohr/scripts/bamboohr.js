@@ -29240,6 +29240,10 @@ function ensureConfigDir() {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true, mode: 448 });
   }
+  const gitignore = join(CONFIG_DIR, ".gitignore");
+  if (!existsSync(gitignore)) {
+    writeFileSync(gitignore, "*\n", { encoding: "utf-8", mode: 384 });
+  }
 }
 function loadConfig() {
   try {
@@ -29285,7 +29289,7 @@ var CONFIG_DIR, CONFIG_FILE, PENDING_OAUTH_FILE;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
-    CONFIG_DIR = join(homedir(), ".bamboohr-cli");
+    CONFIG_DIR = process.env.BAMBOOHR_CONFIG_DIR || join(homedir(), ".bamboohr-cli");
     CONFIG_FILE = join(CONFIG_DIR, "config.json");
     PENDING_OAUTH_FILE = join(CONFIG_DIR, "oauth-pending.json");
   }

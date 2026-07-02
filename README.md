@@ -99,6 +99,8 @@ bamboohr login-oauth-complete --redirect-url 'http://localhost:19876/callback?co
 
 The CLI also honors `HTTPS_PROXY`/`HTTP_PROXY`, so it works behind sandbox egress proxies (use `NODE_EXTRA_CA_CERTS` if the proxy re-signs TLS).
 
+By default credentials live in `~/.bamboohr-cli/`. In ephemeral sandboxes the home directory is wiped between sessions; set `BAMBOOHR_CONFIG_DIR` to a host-mounted folder (e.g. `<project>/.bamboohr`) to persist logins. The CLI drops a `.gitignore` with `*` into the config dir so tokens can't be committed — still, avoid pointing it at synced or shared folders.
+
 ### Other auth commands
 
 ```bash
