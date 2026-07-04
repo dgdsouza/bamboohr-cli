@@ -29454,7 +29454,7 @@ function waitForAuthCode(expectedState) {
       finish(null, code);
     });
     server.on("error", (err) => finish(new Error(`Failed to bind auth callback server: ${err.message}`)));
-    server.listen(REDIRECT_PORT, () => {
+    server.listen(REDIRECT_PORT, "127.0.0.1", () => {
     });
     const timer = setTimeout(() => finish(new Error("Authorization timed out after 120 seconds")), 12e4);
   });
