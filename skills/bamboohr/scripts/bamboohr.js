@@ -29394,6 +29394,13 @@ import { createServer } from "http";
 import { spawn } from "child_process";
 import { URL as URL2 } from "url";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+function resolveManualRedirectUri(explicit) {
+  const uri = explicit ?? process.env.BAMBOOHR_REDIRECT_URI ?? REDIRECT_URI;
+  if (!/^https?:\/\//.test(uri)) {
+    throw new Error(`Invalid redirect URI "${uri}" \u2014 must start with http:// or https://`);
+  }
+  return uri;
+}
 function getAuthorizeUrl(domain) {
   return `https://${domain}.bamboohr.com/authorize.php`;
 }
@@ -29474,7 +29481,7 @@ function openBrowser(url) {
   } catch {
   }
 }
-async function exchangeCodeForToken(domain, code, clientId, clientSecret) {
+async function exchangeCodeForToken(domain, code, clientId, clientSecret, redirectUri) {
   const res = await fetch(`${getTokenUrl(domain)}?request=token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -29483,7 +29490,7 @@ async function exchangeCodeForToken(domain, code, clientId, clientSecret) {
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: REDIRECT_URI
+      redirect_uri: redirectUri
     })
   });
   if (!res.ok) {
@@ -29520,14 +29527,25 @@ async function refreshAccessToken(config) {
   saveConfig(config);
   return data.access_token;
 }
-function buildAuthorizeUrl(companyDomain, clientId, state) {
-  return `${getAuthorizeUrl(companyDomain)}?request=authorize&response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${encodeURIComponent(state)}&scope=${encodeURIComponent(ALL_SCOPES.join(" "))}`;
+function buildAuthorizeUrl(companyDomain, clientId, state, redirectUri) {
+  return `${getAuthorizeUrl(companyDomain)}?request=authorize&response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}&scope=${encodeURIComponent(ALL_SCOPES.join(" "))}`;
 }
-function startManualOAuth(companyDomain, clientId, clientSecret) {
+function startManualOAuth(companyDomain, clientId, clientSecret, redirectUri) {
   assertValidDomain(companyDomain);
+  const resolvedRedirectUri = resolveManualRedirectUri(redirectUri);
   const state = base64url(randomBytes(16));
-  savePendingOAuth({ companyDomain, clientId, clientSecret, state, createdAt: Date.now() });
-  return { authorizeUrl: buildAuthorizeUrl(companyDomain, clientId, state), redirectUri: REDIRECT_URI };
+  savePendingOAuth({
+    companyDomain,
+    clientId,
+    clientSecret,
+    state,
+    redirectUri: resolvedRedirectUri,
+    createdAt: Date.now()
+  });
+  return {
+    authorizeUrl: buildAuthorizeUrl(companyDomain, clientId, state, resolvedRedirectUri),
+    redirectUri: resolvedRedirectUri
+  };
 }
 function parseRedirectInput(input) {
   const trimmed = input.trim();
@@ -29564,7 +29582,13 @@ async function completeManualOAuth(redirectUrlOrCode, explicitState) {
   if (!effectiveState || !constantTimeEquals(effectiveState, pending.state)) {
     throw new Error("OAuth state mismatch \u2014 the pasted URL does not match the pending login. Run: bamboohr login-oauth-start again.");
   }
-  const tokens = await exchangeCodeForToken(pending.companyDomain, code, pending.clientId, pending.clientSecret);
+  const tokens = await exchangeCodeForToken(
+    pending.companyDomain,
+    code,
+    pending.clientId,
+    pending.clientSecret,
+    pending.redirectUri ?? REDIRECT_URI
+  );
   const config = {
     companyDomain: pending.companyDomain,
     auth: {
@@ -29581,13 +29605,13 @@ async function completeManualOAuth(redirectUrlOrCode, explicitState) {
 async function loginWithOAuth(companyDomain, clientId, clientSecret) {
   assertValidDomain(companyDomain);
   const state = base64url(randomBytes(16));
-  const authorizeUrl = buildAuthorizeUrl(companyDomain, clientId, state);
+  const authorizeUrl = buildAuthorizeUrl(companyDomain, clientId, state, REDIRECT_URI);
   console.log("Opening browser for authorization...");
   console.log(`If it doesn't open, visit: ${authorizeUrl}`);
   const codePromise = waitForAuthCode(state);
   openBrowser(authorizeUrl);
   const code = await codePromise;
-  const tokens = await exchangeCodeForToken(companyDomain, code, clientId, clientSecret);
+  const tokens = await exchangeCodeForToken(companyDomain, code, clientId, clientSecret, REDIRECT_URI);
   const config = {
     companyDomain,
     auth: {
@@ -29752,20 +29776,25 @@ function registerLoginCommand(program3) {
       handleError(err);
     }
   });
-  program3.command("login-oauth-start").description("Start OAuth login without a browser (for sandboxed/headless environments like Claude Cowork). Prints the URL to authorize in your own browser.").option("--domain <domain>", "Your BambooHR company domain (or set BAMBOOHR_DOMAIN)").option("--client-id <id>", "OAuth application client ID (or set BAMBOOHR_CLIENT_ID)").option("--client-secret <secret>", "OAuth application client secret (or set BAMBOOHR_CLIENT_SECRET)").action((opts) => {
+  program3.command("login-oauth-start").description("Start OAuth login without a browser (for sandboxed/headless environments like Claude Cowork). Prints the URL to authorize in your own browser.").option("--domain <domain>", "Your BambooHR company domain (or set BAMBOOHR_DOMAIN)").option("--client-id <id>", "OAuth application client ID (or set BAMBOOHR_CLIENT_ID)").option("--client-secret <secret>", "OAuth application client secret (or set BAMBOOHR_CLIENT_SECRET)").option(
+    "--redirect-uri <uri>",
+    "Registered redirect URI, e.g. a hosted callback page (or set BAMBOOHR_REDIRECT_URI; default http://localhost:19876/callback)"
+  ).action((opts) => {
     try {
       const domain = opts.domain ?? process.env.BAMBOOHR_DOMAIN;
       if (!domain) throw new Error("Missing domain. Provide --domain or set BAMBOOHR_DOMAIN.");
       const clientId = resolveSecret(opts.clientId, "BAMBOOHR_CLIENT_ID", "client id");
       const clientSecret = resolveSecret(opts.clientSecret, "BAMBOOHR_CLIENT_SECRET", "client secret");
-      const { authorizeUrl, redirectUri } = startManualOAuth(domain, clientId, clientSecret);
+      const { authorizeUrl, redirectUri } = startManualOAuth(domain, clientId, clientSecret, opts.redirectUri);
+      const isLocalhost = redirectUri.startsWith("http://localhost");
       output({
         status: "pending",
         authorize_url: authorizeUrl,
+        redirect_uri: redirectUri,
         instructions: [
           "Open authorize_url in a browser and approve access.",
-          `The browser will then be redirected to ${redirectUri}, which will fail to load \u2014 that is expected.`,
-          "Copy the FULL URL from the browser address bar (it contains code=... and state=...).",
+          isLocalhost ? `The browser will then be redirected to ${redirectUri}, which will fail to load \u2014 that is expected.` : `The browser will then land on ${redirectUri}, which shows the URL to copy.`,
+          isLocalhost ? "Copy the FULL URL from the browser address bar (it contains code=... and state=...)." : "Use the page's copy button (or copy the full URL from the address bar).",
           "Finish with: bamboohr login-oauth-complete --redirect-url '<pasted url>'",
           "The pending login expires after 15 minutes."
         ]

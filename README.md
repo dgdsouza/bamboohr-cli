@@ -97,6 +97,8 @@ bamboohr login-oauth-start --domain <subdomain> --client-id <id> --client-secret
 bamboohr login-oauth-complete --redirect-url 'http://localhost:19876/callback?code=...&state=...'
 ```
 
+Instead of the localhost error page, you can host a static callback page (e.g. on Vercel) that shows employees a friendly "copy this URL" screen. Register its URL as a redirect URI on the OAuth app, then pass `--redirect-uri <url>` to `login-oauth-start` (or set `BAMBOOHR_REDIRECT_URI`). See the [bamboohr-skill](https://github.com/dgdsouza/bamboohr-skill) repo for a ready-made page.
+
 The CLI also honors `HTTPS_PROXY`/`HTTP_PROXY`, so it works behind sandbox egress proxies (use `NODE_EXTRA_CA_CERTS` if the proxy re-signs TLS).
 
 By default credentials live in `~/.bamboohr-cli/`. In ephemeral sandboxes the home directory is wiped between sessions; set `BAMBOOHR_CONFIG_DIR` to a host-mounted folder (e.g. `<project>/.bamboohr`) to persist logins. The CLI drops a `.gitignore` with `*` into the config dir so tokens can't be committed — still, avoid pointing it at synced or shared folders.

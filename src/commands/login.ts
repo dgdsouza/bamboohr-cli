@@ -56,20 +56,30 @@ export function registerLoginCommand(program: Command): void {
     .option('--domain <domain>', 'Your BambooHR company domain (or set BAMBOOHR_DOMAIN)')
     .option('--client-id <id>', 'OAuth application client ID (or set BAMBOOHR_CLIENT_ID)')
     .option('--client-secret <secret>', 'OAuth application client secret (or set BAMBOOHR_CLIENT_SECRET)')
+    .option(
+      '--redirect-uri <uri>',
+      'Registered redirect URI, e.g. a hosted callback page (or set BAMBOOHR_REDIRECT_URI; default http://localhost:19876/callback)',
+    )
     .action((opts) => {
       try {
         const domain = opts.domain ?? process.env.BAMBOOHR_DOMAIN;
         if (!domain) throw new Error('Missing domain. Provide --domain or set BAMBOOHR_DOMAIN.');
         const clientId = resolveSecret(opts.clientId, 'BAMBOOHR_CLIENT_ID', 'client id');
         const clientSecret = resolveSecret(opts.clientSecret, 'BAMBOOHR_CLIENT_SECRET', 'client secret');
-        const { authorizeUrl, redirectUri } = startManualOAuth(domain, clientId, clientSecret);
+        const { authorizeUrl, redirectUri } = startManualOAuth(domain, clientId, clientSecret, opts.redirectUri);
+        const isLocalhost = redirectUri.startsWith('http://localhost');
         output({
           status: 'pending',
           authorize_url: authorizeUrl,
+          redirect_uri: redirectUri,
           instructions: [
             'Open authorize_url in a browser and approve access.',
-            `The browser will then be redirected to ${redirectUri}, which will fail to load — that is expected.`,
-            'Copy the FULL URL from the browser address bar (it contains code=... and state=...).',
+            isLocalhost
+              ? `The browser will then be redirected to ${redirectUri}, which will fail to load — that is expected.`
+              : `The browser will then land on ${redirectUri}, which shows the URL to copy.`,
+            isLocalhost
+              ? 'Copy the FULL URL from the browser address bar (it contains code=... and state=...).'
+              : "Use the page's copy button (or copy the full URL from the address bar).",
             "Finish with: bamboohr login-oauth-complete --redirect-url '<pasted url>'",
             'The pending login expires after 15 minutes.',
           ],

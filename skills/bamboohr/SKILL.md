@@ -69,6 +69,7 @@ Export it at the start of every session — `bamboohr status` will then find the
 Notes:
 - The authorization code is single-use and expires in minutes — if `login-oauth-complete` fails with an expired/invalid code, just restart from step 2.
 - The BambooHR OAuth app must have `http://localhost:19876/callback` registered as its redirect URI and the scopes listed at the bottom of this file enabled.
+- If the company hosts a callback page (a static site that displays the URL to copy instead of a localhost connection error), pass `--redirect-uri <url>` to `login-oauth-start` or set `BAMBOOHR_REDIRECT_URI`. That URI must also be registered on the BambooHR OAuth app. The rest of the flow is identical — the user copies from the page instead of the address bar.
 - A `fetch failed` error on login usually means the environment's network policy blocks `*.bamboohr.com` — the user needs to allow it in their sandbox/network settings. TLS errors behind an inspecting proxy are fixed by pointing `NODE_EXTRA_CA_CERTS` at the proxy's CA bundle.
 
 ## Core workflows

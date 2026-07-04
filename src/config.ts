@@ -27,6 +27,7 @@ export interface PendingOAuth {
   clientId: string;
   clientSecret: string;
   state: string;
+  redirectUri?: string;
   createdAt: number;
 }
 

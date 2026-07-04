@@ -16,6 +16,20 @@ const REDIRECT_PORT = 19876;
 const REDIRECT_HOST = 'localhost';
 const REDIRECT_URI = `http://${REDIRECT_HOST}:${REDIRECT_PORT}/callback`;
 
+/**
+ * The manual flow can use a hosted callback page (e.g. a static Vercel site)
+ * instead of the localhost URI, so users get a friendly "copy this URL" page
+ * rather than a connection error. The URI must be registered on the BambooHR
+ * OAuth app and must match at both the authorize and token-exchange steps.
+ */
+function resolveManualRedirectUri(explicit?: string): string {
+  const uri = explicit ?? process.env.BAMBOOHR_REDIRECT_URI ?? REDIRECT_URI;
+  if (!/^https?:\/\//.test(uri)) {
+    throw new Error(`Invalid redirect URI "${uri}" — must start with http:// or https://`);
+  }
+  return uri;
+}
+
 function getAuthorizeUrl(domain: string): string {
   return `https://${domain}.bamboohr.com/authorize.php`;
 }
@@ -120,6 +134,7 @@ async function exchangeCodeForToken(
   code: string,
   clientId: string,
   clientSecret: string,
+  redirectUri: string,
 ): Promise<{ access_token: string; refresh_token?: string }> {
   const res = await fetch(`${getTokenUrl(domain)}?request=token`, {
     method: 'POST',
@@ -129,7 +144,7 @@ async function exchangeCodeForToken(
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: REDIRECT_URI,
+      redirect_uri: redirectUri,
     }),
   });
 
@@ -189,11 +204,11 @@ const ALL_SCOPES = [
   'report', 'time_off',
 ];
 
-function buildAuthorizeUrl(companyDomain: string, clientId: string, state: string): string {
+function buildAuthorizeUrl(companyDomain: string, clientId: string, state: string, redirectUri: string): string {
   return (
     `${getAuthorizeUrl(companyDomain)}?request=authorize&response_type=code` +
     `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${encodeURIComponent(state)}` +
     `&scope=${encodeURIComponent(ALL_SCOPES.join(' '))}`
   );
@@ -212,13 +227,25 @@ export function startManualOAuth(
   companyDomain: string,
   clientId: string,
   clientSecret: string,
+  redirectUri?: string,
 ): { authorizeUrl: string; redirectUri: string } {
   assertValidDomain(companyDomain);
 
+  const resolvedRedirectUri = resolveManualRedirectUri(redirectUri);
   const state = base64url(randomBytes(16));
-  savePendingOAuth({ companyDomain, clientId, clientSecret, state, createdAt: Date.now() });
+  savePendingOAuth({
+    companyDomain,
+    clientId,
+    clientSecret,
+    state,
+    redirectUri: resolvedRedirectUri,
+    createdAt: Date.now(),
+  });
 
-  return { authorizeUrl: buildAuthorizeUrl(companyDomain, clientId, state), redirectUri: REDIRECT_URI };
+  return {
+    authorizeUrl: buildAuthorizeUrl(companyDomain, clientId, state, resolvedRedirectUri),
+    redirectUri: resolvedRedirectUri,
+  };
 }
 
 function parseRedirectInput(input: string): { code: string; state: string | null } {
@@ -265,7 +292,13 @@ export async function completeManualOAuth(redirectUrlOrCode: string, explicitSta
     throw new Error('OAuth state mismatch — the pasted URL does not match the pending login. Run: bamboohr login-oauth-start again.');
   }
 
-  const tokens = await exchangeCodeForToken(pending.companyDomain, code, pending.clientId, pending.clientSecret);
+  const tokens = await exchangeCodeForToken(
+    pending.companyDomain,
+    code,
+    pending.clientId,
+    pending.clientSecret,
+    pending.redirectUri ?? REDIRECT_URI,
+  );
 
   const config: Config = {
     companyDomain: pending.companyDomain,
@@ -290,7 +323,8 @@ export async function loginWithOAuth(
 
   const state = base64url(randomBytes(16));
 
-  const authorizeUrl = buildAuthorizeUrl(companyDomain, clientId, state);
+  // The browser flow always uses the loopback URI — it binds the local server.
+  const authorizeUrl = buildAuthorizeUrl(companyDomain, clientId, state, REDIRECT_URI);
 
   console.log('Opening browser for authorization...');
   console.log(`If it doesn't open, visit: ${authorizeUrl}`);
@@ -299,7 +333,7 @@ export async function loginWithOAuth(
   openBrowser(authorizeUrl);
 
   const code = await codePromise;
-  const tokens = await exchangeCodeForToken(companyDomain, code, clientId, clientSecret);
+  const tokens = await exchangeCodeForToken(companyDomain, code, clientId, clientSecret, REDIRECT_URI);
 
   const config: Config = {
     companyDomain,
