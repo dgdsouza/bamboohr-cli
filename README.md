@@ -97,7 +97,7 @@ bamboohr login-oauth-start --domain <subdomain> --client-id <id> --client-secret
 bamboohr login-oauth-complete --redirect-url 'http://localhost:19876/callback?code=...&state=...'
 ```
 
-Instead of the localhost error page, you can host a static callback page (e.g. on Vercel) that shows employees a friendly "copy this URL" screen. Register its URL as a redirect URI on the OAuth app, then pass `--redirect-uri <url>` to `login-oauth-start` (or set `BAMBOOHR_REDIRECT_URI`). See the [bamboohr-skill](https://github.com/dgdsouza/bamboohr-skill) repo for a ready-made page.
+The authorization code stays on the user's machine (it lands in the browser address bar and is pasted back — never sent to a server). Avoid hosting a callback page for BambooHR: it's a confidential client with no PKCE and the client secret is typically shared company-wide, so a code reaching a hosted page's logs could be replayed by an insider. `--redirect-uri` / `BAMBOOHR_REDIRECT_URI` exists for advanced users running their own trusted, non-logging callback, but the localhost default is recommended.
 
 The CLI also honors `HTTPS_PROXY`/`HTTP_PROXY`, so it works behind sandbox egress proxies (use `NODE_EXTRA_CA_CERTS` if the proxy re-signs TLS).
 

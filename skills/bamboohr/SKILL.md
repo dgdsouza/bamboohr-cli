@@ -9,7 +9,7 @@ You have access to a `bamboohr` CLI that talks to the BambooHR API. Every comman
 
 ## Running the CLI
 
-This skill is self-contained: the full CLI is bundled at `scripts/bamboohr.js` next to this SKILL.md (single file, no npm install, requires Node 20+). Set up an alias once per session, using the directory this SKILL.md lives in:
+This skill is self-contained: the full CLI is bundled at `scripts/bamboohr.js` next to this SKILL.md (single file, no npm install, requires Node 22+). Set up an alias once per session, using the directory this SKILL.md lives in:
 
 ```bash
 bamboohr() { node "<this skill's directory>/scripts/bamboohr.js" "$@"; }
@@ -17,7 +17,14 @@ bamboohr() { node "<this skill's directory>/scripts/bamboohr.js" "$@"; }
 
 If a global `bamboohr` command is already on `PATH`, use that instead. All examples below assume `bamboohr` resolves one way or the other.
 
-The CLI automatically routes through `HTTPS_PROXY`/`HTTP_PROXY` when set, so it works inside sandboxed environments (Claude Cowork, Claude Code on the web) as long as the environment's network policy allows `*.bamboohr.com` and `api.bamboohr.com`.
+The CLI automatically routes through `HTTPS_PROXY`/`HTTP_PROXY` when set, so it works behind sandbox egress proxies.
+
+## Supported surfaces & prerequisites
+
+Check these first — the skill silently fails without them:
+
+- **Network egress.** On **claude.ai chat** and **Claude Cowork**, the sandbox's outbound traffic is allowlisted and defaults to "package managers only". An **org admin must allowlist `*.bamboohr.com` and `api.bamboohr.com`** (org Capabilities / network settings) or *both* the OAuth token exchange and every API call are blocked. A `fetch failed` error on login almost always means this hasn't been done. **Claude Code** has full network access and needs nothing. Behind a TLS-inspecting proxy, point `NODE_EXTRA_CA_CERTS` at the proxy's CA bundle.
+- **Login persistence.** On claude.ai chat and **Cowork without a mounted folder**, the environment is per-session and wiped when the session ends — the user re-authenticates each session. To persist the login, use a **mounted Cowork folder** with `BAMBOOHR_CONFIG_DIR` (see below), or run on **Claude Code** (real disk). This is expected, not a bug.
 
 ## Before you start
 
@@ -27,18 +34,18 @@ Check authentication first:
 bamboohr status
 ```
 
-If unauthenticated, pick the flow that fits the environment:
+If unauthenticated, pick the flow that fits the environment. Never invent credentials — if the user hasn't provided them, ask.
 
-- **API key** (any environment): `bamboohr login --domain <subdomain> --api-key <key>` (or via `BAMBOOHR_DOMAIN` / `BAMBOOHR_API_KEY`)
-- **OAuth with a local browser** (CLI running on the user's own machine): `bamboohr login-oauth --domain <subdomain> --client-id <id> --client-secret <secret>` (or env vars). Opens a browser and catches the redirect on `localhost:19876`.
-- **OAuth without a browser** (sandboxed/remote environments — Claude Cowork, Claude Code on the web, SSH): use the two-step manual flow below. The sandbox cannot open the user's browser or receive the localhost redirect, so the user completes authorization themselves and pastes the result back.
+- **API key** (any environment): `bamboohr login --domain <subdomain> --api-key <key>` (or via `BAMBOOHR_DOMAIN` / `BAMBOOHR_API_KEY`).
+- **OAuth, sandboxed (Claude Cowork, claude.ai, SSH)** — the manual paste flow below. This is the normal path in Cowork.
+- **OAuth, on the user's own machine (Claude Code / local terminal)** — the automatic local flow, or the local-run recipe to seed a mounted folder.
 
-Never invent credentials. If the user has not provided them, ask.
+### Manual OAuth (paste flow) — use this in Claude Cowork
 
-### Manual OAuth flow (use this in Claude Cowork)
+The authorization code stays on the user's machine the whole time (it lands in their browser's address bar, never on a server), so nothing sensitive is ever logged remotely.
 
 1. Get the company subdomain, OAuth client ID, and client secret (from the user, or from `BAMBOOHR_DOMAIN` / `BAMBOOHR_CLIENT_ID` / `BAMBOOHR_CLIENT_SECRET` if the environment defines them).
-2. Start the login — this prints an `authorize_url` and remembers the pending login for 15 minutes:
+2. Start the login — prints an `authorize_url` and remembers the pending login for 15 minutes:
 
    ```bash
    bamboohr login-oauth-start --domain <subdomain> --client-id <id> --client-secret <secret>
@@ -54,23 +61,39 @@ Never invent credentials. If the user has not provided them, ask.
    bamboohr login-oauth-complete --redirect-url '<pasted url>'
    ```
 
-5. Confirm with `bamboohr status`. Tokens are stored in `~/.bamboohr-cli/config.json` and refreshed automatically; if the sandbox is fresh (new session, ephemeral VM), the user will need to log in again.
+5. Confirm with `bamboohr status`. Tokens are stored in the config dir and refreshed automatically.
 
-#### Persisting the login across sessions
+The authorization code is single-use and expires in minutes — if `login-oauth-complete` reports an expired/invalid code, just restart from step 2. The BambooHR OAuth app must have `http://localhost:19876/callback` registered as a redirect URI and the scopes listed at the bottom of this file enabled.
 
-The sandbox home directory is wiped between Cowork sessions, but the mounted project folder is not. To avoid re-logging-in every session, set `BAMBOOHR_CONFIG_DIR` to a folder on the mount before any command (including login):
+### Fully-automatic login (on the user's own machine)
+
+If the CLI runs directly on the user's computer (Claude Code, or a terminal on their Mac), skip the paste flow entirely:
 
 ```bash
-export BAMBOOHR_CONFIG_DIR="<mounted project folder>/.bamboohr"
+bamboohr login-oauth --domain <subdomain> --client-id <id> --client-secret <secret>
 ```
 
-Export it at the start of every session — `bamboohr status` will then find the saved login. The CLI writes a `.gitignore` with `*` inside that folder so the credentials can't be committed, and files are created with `0600`. Ask the user before enabling this the first time: it stores their refresh token on the host, so they shouldn't use a folder that is synced or shared with other people.
+This opens the browser and catches the redirect on a temporary `127.0.0.1:19876` server — no copy/paste. To *seed a Cowork-mounted folder* so future Cowork sessions inherit the login, run it on the Mac with `BAMBOOHR_CONFIG_DIR` pointed into that mounted folder (needs Node on the Mac):
 
-Notes:
-- The authorization code is single-use and expires in minutes — if `login-oauth-complete` fails with an expired/invalid code, just restart from step 2.
-- The BambooHR OAuth app must have `http://localhost:19876/callback` registered as its redirect URI and the scopes listed at the bottom of this file enabled.
-- If the company hosts a callback page (a static site that displays the URL to copy instead of a localhost connection error), pass `--redirect-uri <url>` to `login-oauth-start` or set `BAMBOOHR_REDIRECT_URI`. That URI must also be registered on the BambooHR OAuth app. The rest of the flow is identical — the user copies from the page instead of the address bar.
-- A `fetch failed` error on login usually means the environment's network policy blocks `*.bamboohr.com` — the user needs to allow it in their sandbox/network settings. TLS errors behind an inspecting proxy are fixed by pointing `NODE_EXTRA_CA_CERTS` at the proxy's CA bundle.
+```bash
+BAMBOOHR_CONFIG_DIR="<mounted folder>/.bamboohr" bamboohr login-oauth --domain <subdomain> --client-id <id> --client-secret <secret>
+```
+
+### Persisting the login across sessions (`BAMBOOHR_CONFIG_DIR`)
+
+By default the config lives in `~/.bamboohr-cli/`, which is wiped between Cowork sessions. Point `BAMBOOHR_CONFIG_DIR` at a **mounted** folder to keep the login (export it at the very start of the session, before any `bamboohr` command including login):
+
+```bash
+export BAMBOOHR_CONFIG_DIR="<mounted folder>/.bamboohr"
+```
+
+The CLI auto-creates the directory (`0700`), stores files `0600`, and writes a `.gitignore` containing `*` inside it so the tokens can't be committed. The directory must be **inside a mounted folder** to actually persist — anywhere else lands on the ephemeral VM disk and is wiped at session end.
+
+**Ask the user before enabling this the first time.** It writes their refresh token to their real disk, and the sandbox won't prompt (the mounted folder was already granted). Warn them not to use a folder that is synced (iCloud/Dropbox) or shared with other people.
+
+### Why there's no hosted login page
+
+You might wonder why the flow uses a "copy from the address bar" step instead of a nice hosted callback page. It's deliberate: BambooHR is a confidential-client OAuth provider with **no PKCE**, and the client secret is typically shared across everyone in the company — so an authorization code that reached any hosted page's request logs could be replayed by an insider to impersonate a user. Keeping the code in the user's browser/address bar (never sending it to a server) removes that risk entirely. Do **not** introduce a hosted callback for BambooHR. (`--redirect-uri` / `BAMBOOHR_REDIRECT_URI` exists for advanced users who run their own trusted, non-logging callback, but the localhost default is recommended.)
 
 ## Core workflows
 
@@ -137,8 +160,10 @@ bamboohr time-off balance <id>
 For data that spans many fields or filters across the whole company, use custom reports instead of iterating the directory:
 
 ```bash
-bamboohr reports custom --fields "firstName,lastName,department,hireDate,customHiringManager" --title "Hiring history"
+bamboohr reports custom --data '{"title":"Hiring history","fields":["firstName","lastName","department","hireDate","customHiringManager"]}'
 ```
+
+`reports custom` takes the report definition as a single JSON object via `--data` (a `fields` array, optional `filters`, optional `title`); there is no `--fields`/`--title` flag. Add `--format CSV` (or `XML`) if you want non-JSON output.
 
 The output is `{ employees: { "<key>": { ... } } }`. **The outer key is NOT the employee ID** — it's an arbitrary internal key. The real employee ID is in `record.id` inside each entry. Always re-index by `record.id` if you need to join with directory data:
 
@@ -154,7 +179,7 @@ Convert to an array with `Object.values()` for filtering.
 The hiring manager is in `customHiringManager` (a string, not an ID). Pull a report including that field and filter:
 
 ```bash
-bamboohr reports custom --fields "firstName,lastName,jobTitle,department,hireDate,customHiringManager,status" --title "Hires" | node -e "
+bamboohr reports custom --data '{"title":"Hires","fields":["firstName","lastName","jobTitle","department","hireDate","customHiringManager","status"]}' | node -e "
 const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
 const target = 'EXACT NAME';
 const hires = Object.values(d.employees).filter(e => e.customHiringManager === target);
@@ -184,14 +209,14 @@ For transitive reports (whole org under someone), recurse over `supervisor === <
 ## Output and error handling
 
 - All commands print JSON. Pipe through `node -e` or `jq` for filtering. Don't rely on regex over the human-readable output.
-- Errors print a JSON object with an `error` field to stderr and exit non-zero.
+- Command/API errors print a JSON object with an `error` field to stderr and exit non-zero. (Bad *arguments* — an unknown flag or a missing required option — are caught earlier by the arg parser and print a plain-text usage message, not JSON.)
 - 401 errors on OAuth will trigger an auto-refresh if a refresh token is stored; otherwise the user must re-login.
 
 ## Things to avoid
 
 - **Don't guess employee IDs.** Always look them up via the directory first.
 - **Don't query `/employees/directory` if you only need one person's basic info** — it returns the entire company. Use `employees get <id>` once you have the ID.
-- **Don't assume scopes.** OAuth tokens are scoped to what the developer-portal app has enabled. If a request returns 401 on a specific endpoint (e.g. `/employees/directory` works but compensation fails), the corresponding scope is missing from the app — the user must enable it in the developer portal and re-run `login-oauth`. The CLI itself already requests every available scope.
+- **Don't assume scopes.** OAuth tokens are scoped to what the developer-portal app has enabled. If a request returns 401 on a specific endpoint (e.g. `/employees/directory` works but compensation fails), the corresponding scope is missing from the app — the user must enable it in the developer portal and re-authenticate (`login-oauth-start` in a sandbox, or `login-oauth` locally). The CLI itself already requests every available scope.
 - **Don't try to write data without explicit user confirmation.** `create`, `update`, `delete`, `clock-in/out`, `adjust-balance` etc. mutate live HR records.
 
 ## OAuth scopes (full list)
@@ -206,7 +231,7 @@ The CLI requests every scope BambooHR offers. The app in the developer portal mu
 
 **OIDC basics:** `openid`, `email`
 
-Mapping: if a command 401s, infer the scope from the endpoint it hits — `tables get <id> compensation` needs `employee:compensation`; `time-off whos-out` needs `time_off`; `reports custom` needs `report`; `employees directory` needs `employee_directory`. Tell the user to enable the missing scope in the developer portal and re-run `login-oauth`.
+Mapping: if a command 401s, infer the scope from the endpoint it hits — `tables get <id> compensation` needs `employee:compensation`; `time-off whos-out` needs `time_off`; `reports custom` needs `report`; `employees directory` needs `employee_directory`. Tell the user to enable the missing scope in the developer portal and re-authenticate (`login-oauth-start` in a sandbox, or `login-oauth` locally).
 
 ## Discovery
 
