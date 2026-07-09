@@ -29393,7 +29393,7 @@ __export(oauth_exports, {
 import { createServer } from "http";
 import { spawn } from "child_process";
 import { URL as URL2 } from "url";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 function resolveManualRedirectUri(explicit) {
   const uri = explicit ?? process.env.BAMBOOHR_REDIRECT_URI ?? REDIRECT_URI;
   if (!/^https?:\/\//.test(uri)) {
