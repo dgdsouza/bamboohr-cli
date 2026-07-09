@@ -60,10 +60,4 @@ node "$CLI" login-oauth-start --domain acme --client-id id --client-secret sec >
 [ "$(cat "$BAMBOOHR_CONFIG_DIR/.gitignore")" = "*" ] || fail "config dir .gitignore missing or wrong"
 pass "BAMBOOHR_CONFIG_DIR + self-gitignore"
 
-# The callback page must stay fully static: no external URLs loaded by the page.
-if grep -E 'src="https?://|href="https?://|@import|url\(https?://' callback-page/index.html; then
-  fail "callback page references an external resource"
-fi
-pass "callback page has no external resources"
-
 echo "All smoke tests passed."

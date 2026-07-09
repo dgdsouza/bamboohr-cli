@@ -4,13 +4,13 @@ Guidance for Claude when working in this repository.
 
 ## What this repo is
 
-The distributable **BambooHR skill** for Claude Cowork / Claude Code. The repo root is the skill itself: `SKILL.md` + `scripts/bamboohr.js`. Everything else (callback page, packaging script, tests, docs) supports distribution. The CLI's *source code* does not live here.
+The distributable **BambooHR skill** for Claude Cowork / Claude Code. The repo root is the skill itself: `SKILL.md` + `scripts/bamboohr.js`. Everything else (packaging script, tests, docs) supports distribution. The CLI's *source code* does not live here.
 
 ## Hard rules
 
 - **Never hand-edit `scripts/bamboohr.js`.** It is a generated single-file bundle vendored from [dgdsouza/bamboohr-cli](https://github.com/dgdsouza/bamboohr-cli). To change CLI behavior: change that repo, run `npm run build` there, copy `skills/bamboohr/scripts/bamboohr.js` here, and update the source commit hash in README.md ("Updating the bundled CLI" section).
 - **Keep `SKILL.md` truthful to the bundled CLI.** If you update the bundle, re-check every command, flag, and env var mentioned in SKILL.md against `node scripts/bamboohr.js <cmd> --help`. The upstream repo has its own copy of SKILL.md — keep the two in sync.
-- **`callback-page/` must stay 100% static.** No serverless functions, no analytics, no external scripts/fonts/styles, no fetch/XHR. Never insert URL-derived values with `innerHTML` — only `value`/`textContent`. The page receives live OAuth authorization codes; anything that transmits or logs them is a security regression.
+- **No hosted OAuth callback page for BambooHR.** A hosted callback was deliberately rejected: BambooHR is a confidential client with no PKCE and a company-wide client secret, so a code reaching any server's logs is replayable by an insider. The login must keep the authorization code client-side (localhost flow). Do not add a callback page, a `--redirect-uri` default pointing at a hosted URL, or anything that sends the code to a server.
 - **Never commit credentials** — no real client IDs/secrets, tokens, or company subdomains in examples. Use placeholders like `<subdomain>`.
 
 ## Environment variables the CLI understands
