@@ -24,7 +24,7 @@ The distributable **BambooHR skill** for Claude Cowork / Claude Code. The repo r
 node scripts/bamboohr.js --help
 ```
 
-The smoke tests cover: help output, unauthenticated status, `login-oauth-start` (default + custom redirect URI), state-mismatch rejection in `login-oauth-complete`, and `BAMBOOHR_CONFIG_DIR` (including its self-written `.gitignore`). They use a temp `HOME` and never touch the network. For deeper OAuth testing, the upstream repo's approach is a local HTTPS mock of `<sub>.bamboohr.com/token.php` with a self-signed cert, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS`.
+The smoke tests cover: help output, unauthenticated status, `login-oauth-start` (default + custom redirect URI), state-mismatch rejection in `login-oauth-complete`, and `BAMBOOHR_CONFIG_DIR` (including its self-written `.gitignore`). They use a temp `HOME` and never touch the network. The bundle requires **Node ≥ 22.19** (bundled `undici`), so CI runs Node 22 and 24. For deeper OAuth testing during development, stand up a local HTTPS mock of `<sub>.bamboohr.com/token.php` with a self-signed cert and run the CLI with `NO_PROXY=<sub>.bamboohr.com` and `NODE_EXTRA_CA_CERTS` pointed at the cert (this harness lives outside the repo).
 
 ## Packaging
 

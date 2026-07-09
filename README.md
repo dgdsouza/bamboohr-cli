@@ -2,7 +2,7 @@
 
 A self-contained [Agent Skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) that lets employees query BambooHR from **Claude Cowork**, **Claude Code**, or claude.ai — including a browser-based OAuth login designed to work inside sandboxed environments where the CLI can't receive the localhost redirect directly.
 
-The repo root **is** the skill: `SKILL.md` plus a fully bundled single-file CLI at `scripts/bamboohr.js` (no npm install needed, only Node 20+).
+The repo root **is** the skill: `SKILL.md` plus a fully bundled single-file CLI at `scripts/bamboohr.js` (no npm install needed, only Node 22+ — the bundled `undici` requires Node ≥ 22.19).
 
 ## Repo layout
 
@@ -58,7 +58,7 @@ A hosted "copy this URL" page would be friendlier than the localhost error scree
 
 ## Updating the bundled CLI
 
-`scripts/bamboohr.js` is a build artifact — don't edit it by hand. It is built from [dgdsouza/bamboohr-cli](https://github.com/dgdsouza/bamboohr-cli) (currently commit `e158ed9`):
+`scripts/bamboohr.js` is a build artifact — don't edit it by hand. It is built from [dgdsouza/bamboohr-cli](https://github.com/dgdsouza/bamboohr-cli) (currently commit `360a465`):
 
 ```bash
 # in a checkout of bamboohr-cli

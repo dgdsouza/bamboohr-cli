@@ -9,7 +9,7 @@ You have access to a `bamboohr` CLI that talks to the BambooHR API. Every comman
 
 ## Running the CLI
 
-This skill is self-contained: the full CLI is bundled at `scripts/bamboohr.js` next to this SKILL.md (single file, no npm install, requires Node 20+). Set up an alias once per session, using the directory this SKILL.md lives in:
+This skill is self-contained: the full CLI is bundled at `scripts/bamboohr.js` next to this SKILL.md (single file, no npm install, requires Node 22+). Set up an alias once per session, using the directory this SKILL.md lives in:
 
 ```bash
 bamboohr() { node "<this skill's directory>/scripts/bamboohr.js" "$@"; }
@@ -160,8 +160,10 @@ bamboohr time-off balance <id>
 For data that spans many fields or filters across the whole company, use custom reports instead of iterating the directory:
 
 ```bash
-bamboohr reports custom --fields "firstName,lastName,department,hireDate,customHiringManager" --title "Hiring history"
+bamboohr reports custom --data '{"title":"Hiring history","fields":["firstName","lastName","department","hireDate","customHiringManager"]}'
 ```
+
+`reports custom` takes the report definition as a single JSON object via `--data` (a `fields` array, optional `filters`, optional `title`); there is no `--fields`/`--title` flag. Add `--format CSV` (or `XML`) if you want non-JSON output.
 
 The output is `{ employees: { "<key>": { ... } } }`. **The outer key is NOT the employee ID** — it's an arbitrary internal key. The real employee ID is in `record.id` inside each entry. Always re-index by `record.id` if you need to join with directory data:
 
@@ -177,7 +179,7 @@ Convert to an array with `Object.values()` for filtering.
 The hiring manager is in `customHiringManager` (a string, not an ID). Pull a report including that field and filter:
 
 ```bash
-bamboohr reports custom --fields "firstName,lastName,jobTitle,department,hireDate,customHiringManager,status" --title "Hires" | node -e "
+bamboohr reports custom --data '{"title":"Hires","fields":["firstName","lastName","jobTitle","department","hireDate","customHiringManager","status"]}' | node -e "
 const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
 const target = 'EXACT NAME';
 const hires = Object.values(d.employees).filter(e => e.customHiringManager === target);
@@ -207,14 +209,14 @@ For transitive reports (whole org under someone), recurse over `supervisor === <
 ## Output and error handling
 
 - All commands print JSON. Pipe through `node -e` or `jq` for filtering. Don't rely on regex over the human-readable output.
-- Errors print a JSON object with an `error` field to stderr and exit non-zero.
+- Command/API errors print a JSON object with an `error` field to stderr and exit non-zero. (Bad *arguments* — an unknown flag or a missing required option — are caught earlier by the arg parser and print a plain-text usage message, not JSON.)
 - 401 errors on OAuth will trigger an auto-refresh if a refresh token is stored; otherwise the user must re-login.
 
 ## Things to avoid
 
 - **Don't guess employee IDs.** Always look them up via the directory first.
 - **Don't query `/employees/directory` if you only need one person's basic info** — it returns the entire company. Use `employees get <id>` once you have the ID.
-- **Don't assume scopes.** OAuth tokens are scoped to what the developer-portal app has enabled. If a request returns 401 on a specific endpoint (e.g. `/employees/directory` works but compensation fails), the corresponding scope is missing from the app — the user must enable it in the developer portal and re-run `login-oauth`. The CLI itself already requests every available scope.
+- **Don't assume scopes.** OAuth tokens are scoped to what the developer-portal app has enabled. If a request returns 401 on a specific endpoint (e.g. `/employees/directory` works but compensation fails), the corresponding scope is missing from the app — the user must enable it in the developer portal and re-authenticate (`login-oauth-start` in a sandbox, or `login-oauth` locally). The CLI itself already requests every available scope.
 - **Don't try to write data without explicit user confirmation.** `create`, `update`, `delete`, `clock-in/out`, `adjust-balance` etc. mutate live HR records.
 
 ## OAuth scopes (full list)
@@ -229,7 +231,7 @@ The CLI requests every scope BambooHR offers. The app in the developer portal mu
 
 **OIDC basics:** `openid`, `email`
 
-Mapping: if a command 401s, infer the scope from the endpoint it hits — `tables get <id> compensation` needs `employee:compensation`; `time-off whos-out` needs `time_off`; `reports custom` needs `report`; `employees directory` needs `employee_directory`. Tell the user to enable the missing scope in the developer portal and re-run `login-oauth`.
+Mapping: if a command 401s, infer the scope from the endpoint it hits — `tables get <id> compensation` needs `employee:compensation`; `time-off whos-out` needs `time_off`; `reports custom` needs `report`; `employees directory` needs `employee_directory`. Tell the user to enable the missing scope in the developer portal and re-authenticate (`login-oauth-start` in a sandbox, or `login-oauth` locally).
 
 ## Discovery
 
